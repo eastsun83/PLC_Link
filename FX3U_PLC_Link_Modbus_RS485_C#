@@ -1,0 +1,664 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.IO.Ports;
+using System.Threading;
+
+//此連線為 FX3U Modbus 連線 使用 FX3U_RS485_BD模組
+namespace MIL_Text.Drive_Link
+{
+    class FX3U_PLC_Link_Modbus_RS485
+    {
+        SerialPort FX3U_PLC_Link_Modbus_Port = new SerialPort();
+        public bool Link_State = false;
+        //必須先執行此程式
+        public void Open_Port(string Port,int Baud, Parity Parity_Set, int Data_Bit, StopBits Stop_Bit)
+        {
+            FX3U_PLC_Link_Modbus_Port.PortName = Port;//設定COM
+            FX3U_PLC_Link_Modbus_Port.BaudRate = Baud;//設定包率
+            FX3U_PLC_Link_Modbus_Port.Parity = Parity_Set;//設定同位數檢查
+            FX3U_PLC_Link_Modbus_Port.DataBits = Data_Bit;//設定BIT資料長度
+            FX3U_PLC_Link_Modbus_Port.StopBits = Stop_Bit;//設定結尾字元
+            FX3U_PLC_Link_Modbus_Port.ReadTimeout = 100;//設定讀出異常時間
+            FX3U_PLC_Link_Modbus_Port.WriteTimeout = 100;//設定寫入異常時間
+            try
+            {
+                FX3U_PLC_Link_Modbus_Port.Open();//連線
+            }
+            catch
+            {
+
+            }
+            Link_State = FX3U_PLC_Link_Modbus_Port.IsOpen;
+        }
+
+        //關閉通訊
+        public void Close_Port()
+        {
+            try
+            {
+                FX3U_PLC_Link_Modbus_Port.Close();
+            }
+            catch
+            {
+
+            }
+            Link_State = FX3U_PLC_Link_Modbus_Port.IsOpen;
+        }
+
+        //通訊釋放所有資源
+        public void Free_Port()
+        {
+            FX3U_PLC_Link_Modbus_Port.Dispose();
+        }
+
+        //設定Modbus FX3U 線圈位置
+        private int FX3U_Coil_M_Address = 0x0000;
+        private int FX3U_Coil_M8000_Address = 0x1E00;
+        private int FX3U_Coil_S_Address = 0x2000;
+        private int FX3U_Coil_TS_Address = 0x3000;
+        private int FX3U_Coil_CS_Address = 0x3200;
+        private int FX3U_Coil_Y_Address = 0x3300;
+        private int FX3U_Coil_X_Address = 0x3400;
+
+        //寫入單一線圈功能 05
+        //Device:要寫入之線圈 例如:"Y" "M"
+        //Number:要寫入第幾個線圈
+        //Data:設定true or false (設定ON OR OFF)
+        public void FX3U_Modbus_Write_Coil_Bit(string Device, int Number, bool Data)
+        {
+            Link_State = FX3U_PLC_Link_Modbus_Port.IsOpen;
+            if (FX3U_PLC_Link_Modbus_Port.IsOpen == false)
+                return;
+            //取得線圈位置
+            int Device_Position = FX3U_Coil_M_Address;
+
+            Device_Position = Switch_Device_Coil(Device);
+
+            Device_Position = Device_Position + Number;
+
+            //不能超過最大值 超過設為零
+            if (Device_Position > 0x34FF)
+            {
+                Device_Position = 0;
+            }
+
+            string message = null;
+            string message_device_position = null;
+            message_device_position = Convert.ToString(Device_Position, 16);
+
+            for (int i = message_device_position.Length; i <= 3; i++)//補到四位數
+            {
+                message_device_position = "0" + message_device_position;
+            }
+
+            message = "0105" + message_device_position;
+
+            if (Data)
+            {
+                message = message + "FF00";
+            }
+            else
+            {
+                message = message + "0000";
+            }
+
+            byte[] message_byte = change(message);
+
+            byte[] CRC_byte = GetCRC(message_byte);
+
+            byte[] floatVals = new byte[message_byte.Length + CRC_byte.Length];
+
+            int j = 0;
+            for (int i = 0; (floatVals.Length - 1) > i; i++)
+            {
+
+                if (i < message_byte.Length - 1)
+                {
+                    floatVals[i] = message_byte[i];
+                }
+                else
+                {
+                    if (j <= 1)
+                    {
+                        floatVals[i] = CRC_byte[j];
+                        j++;
+                    }
+                }
+            }
+
+            FX3U_PLC_Link_Modbus_Port.DiscardInBuffer();
+            FX3U_PLC_Link_Modbus_Port.Write(floatVals, 0, floatVals.Length);
+
+
+        }
+
+        //Modbus 01
+        public bool[] FX3U_Modbus_Read_Coil_Data(string Device, int Number, int Position_Size)
+        {
+            Link_State = FX3U_PLC_Link_Modbus_Port.IsOpen;
+            bool[] Alarm = new bool[0];
+            if (FX3U_PLC_Link_Modbus_Port.IsOpen == false)
+                return Alarm;
+
+            int Device_Position = FX3U_Coil_M_Address;//取得線圈位置
+
+            Device_Position = Switch_Device_Coil(Device);
+
+            Device_Position = Device_Position + Number;
+
+            if (Device_Position > 0xA7C7)
+            {
+                Device_Position = 0;
+            }
+
+            string message = null;
+            string message_device_position = null;
+            message_device_position = Convert.ToString(Device_Position, 16);
+
+            for (int i = message_device_position.Length; i <= 3; i++)//補到四位數
+            {
+                message_device_position = "0" + message_device_position;
+            }
+
+            message = "0101" + message_device_position;
+
+            string Position_Size_ST = null;
+
+            Position_Size_ST = Convert.ToString(Position_Size, 16);
+
+            for (int i = Position_Size_ST.Length; i <= 3; i++)//補到四位數
+            {
+                Position_Size_ST = "0" + Position_Size_ST;
+            }
+
+            message = message + Position_Size_ST;
+
+            byte[] message_byte = change(message);
+
+            byte[] CRC_byte = GetCRC(message_byte);
+
+            byte[] floatVals = new byte[message_byte.Length + CRC_byte.Length];
+
+            int j = 0;
+            for (int i = 0; (floatVals.Length - 1) > i; i++)
+            {
+
+                if (i < message_byte.Length - 1)
+                {
+                    floatVals[i] = message_byte[i];
+                }
+                else
+                {
+                    if (j <= 1)
+                    {
+                        floatVals[i] = CRC_byte[j];
+                        j++;
+                    }
+                }
+            }
+
+            FX3U_PLC_Link_Modbus_Port.DiscardInBuffer();
+            FX3U_PLC_Link_Modbus_Port.Write(floatVals, 0, floatVals.Length);
+
+            int Sleep_Timer = 60;
+
+            Thread.Sleep(Sleep_Timer);
+
+            int iBytesToRead = FX3U_PLC_Link_Modbus_Port.BytesToRead;
+            byte[] receiveBytes = new byte[iBytesToRead];
+            //資料讀取
+            FX3U_PLC_Link_Modbus_Port.Read(receiveBytes, 0, receiveBytes.Length);
+
+            int Receive_Length = 0;
+            int Receive_Bytes_Number = 0;
+            int Second_0x1 = 0;
+            for (int i = 0; i < receiveBytes.Length; i++)
+            {
+                if (receiveBytes[i] == 0x1)
+                {
+                    Second_0x1++;
+                    if (Second_0x1 == 2)
+                    {
+                        Receive_Length = receiveBytes[i + 1];
+                        Receive_Bytes_Number = i + 2;
+                        break;
+                    }
+                }
+            }
+
+            string Receive_Data_ST = null;
+
+
+            for (int i = 0; i < Receive_Length; i++)
+            {
+                Receive_Data_ST = Convert.ToString(receiveBytes[Receive_Bytes_Number + i], 2) + Receive_Data_ST;
+            }
+
+            bool[] Receive_Data = new bool[Position_Size];
+
+            for (int i = 0; i < Receive_Data.Length; i++)
+            {
+                try
+                {
+                    if (Receive_Data_ST.Substring(Receive_Data_ST.Length - i - 1, 1) == "1")
+                    {
+                        Receive_Data[i] = true;
+                    }
+                    else
+                    {
+                        Receive_Data[i] = false;
+                    }
+                }
+                catch
+                {
+                    Receive_Data[i] = false;
+                }
+
+            }
+
+            return Receive_Data;
+
+        }
+
+        private int Switch_Device_Coil(string Device)
+        {
+            switch (Device)
+            {
+                case "M":
+                    return FX3U_Coil_M_Address;
+                case "M8000":
+                    return FX3U_Coil_M8000_Address;
+                case "S":
+                    return FX3U_Coil_S_Address;
+                case "TS":
+                    return FX3U_Coil_TS_Address;
+                case "CS":
+                    return FX3U_Coil_CS_Address;
+                case "Y":
+                    return FX3U_Coil_Y_Address;
+                case "X":
+                    return FX3U_Coil_X_Address;
+            }
+            return 0;
+        }
+
+        private int FX3U_Register_D_Address = 0x0000;
+        private int FX3U_Register_D8000_Address = 0x1F40;
+        private int FX3U_Register_R_Address = 0x2140;
+        private int FX3U_Register_TN_Address = 0xA140;
+        private int FX3U_Register_CN_Address = 0xA340;
+        private int FX3U_Register_M_Address = 0xA478;
+        private int FX3U_Register_M8000_Address = 0xA658;
+        private int FX3U_Register_S_Address = 0xA678;
+        private int FX3U_Register_TS_Address = 0xA478;
+        private int FX3U_Register_CS_Address = 0xA778;
+        private int FX3U_Register_Y_Address = 0xA7A8;
+        private int FX3U_Register_X_Address = 0xA7B8;
+        //Modbus 功能 10
+        public void FX3U_Modbus_Write_Register_Data(string Device, int Number, int[] Data)
+        {
+            Link_State = FX3U_PLC_Link_Modbus_Port.IsOpen;
+            if (FX3U_PLC_Link_Modbus_Port.IsOpen == false)
+                return ;
+
+            int Device_Position = FX3U_Coil_M_Address;//取得線圈位置
+
+            Device_Position = Switch_Device_Register(Device);
+
+            Device_Position = Device_Position + Number;
+
+            if (Device_Position > 0xA7C7)
+            {
+                Device_Position = 0;
+            }
+
+            string message = null;
+            string message_device_position = null;
+            message_device_position = Convert.ToString(Device_Position, 16);
+
+            for (int i = message_device_position.Length; i <= 3; i++)//補到四位數
+            {
+                message_device_position = "0" + message_device_position;
+            }
+
+            message = "0110" + message_device_position;
+
+            string Position_Size = null;
+            string Data_Length = null;
+
+            Position_Size = Convert.ToString(Data.Length, 16);
+            Data_Length = Convert.ToString(Data.Length * 2, 16);
+
+            for (int i = Position_Size.Length; i <= 3; i++)//補到四位數
+            {
+                Position_Size = "0" + Position_Size;
+            }
+
+            message = message + Position_Size;
+            for (int i = Data_Length.Length; i <= 1; i++)//補到二位數
+            {
+                Data_Length = "0" + Data_Length;
+            }
+
+            message = message + Data_Length;
+            ///*
+            Parallel.For(0, Data.Length, i =>
+            {
+                string Data_Arrange = null;
+                Data_Arrange = Convert.ToString(Data[i], 16);
+
+                for (int ii = Data_Arrange.Length; ii <= 3; ii++)//補到四位數
+                {
+                    Data_Arrange = "0" + Data_Arrange;
+                }
+
+                message = message + Data_Arrange;
+            }
+            );
+            
+            byte[] message_byte = change(message);
+
+            byte[] CRC_byte = GetCRC(message_byte);
+
+            System.Array.Resize(ref message_byte, message_byte.Length + 2);
+
+            message_byte[message_byte.Length - 2] = CRC_byte[0];
+            message_byte[message_byte.Length - 1] = CRC_byte[1];
+
+            FX3U_PLC_Link_Modbus_Port.DiscardInBuffer();
+            FX3U_PLC_Link_Modbus_Port.Write(message_byte, 0, message_byte.Length);
+
+
+        }
+        //Modbus 03
+        public int[] FX3U_Modbus_Read_Register_Data(string Device, int Number, int Position_Size)
+        {
+            Link_State = FX3U_PLC_Link_Modbus_Port.IsOpen;
+            int[] Alarm = new int[0];
+            if (FX3U_PLC_Link_Modbus_Port.IsOpen == false)
+                return Alarm;
+
+            int Device_Position = FX3U_Register_M_Address;//取得線圈位置
+
+            Device_Position = Switch_Device_Register(Device);
+
+            Device_Position = Device_Position + Number;
+
+            if (Device_Position > 0xA7C7)
+            {
+                Device_Position = 0;
+            }
+
+            string message = null;
+            string message_device_position = null;
+            message_device_position = Convert.ToString(Device_Position, 16);
+
+            for (int i = message_device_position.Length; i <= 3; i++)//補到四位數
+            {
+                message_device_position = "0" + message_device_position;
+            }
+
+            message = "0103" + message_device_position;
+
+            string Position_Size_ST = null;
+
+            Position_Size_ST = Convert.ToString(Position_Size, 16);
+
+            for (int i = Position_Size_ST.Length; i <= 3; i++)//補到四位數
+            {
+                Position_Size_ST = "0" + Position_Size_ST;
+            }
+
+            message = message + Position_Size_ST;
+
+            byte[] message_byte = change(message);
+
+            byte[] CRC_byte = GetCRC(message_byte);
+
+            byte[] floatVals = new byte[message_byte.Length + CRC_byte.Length];
+
+            int j = 0;
+            for (int i = 0; (floatVals.Length - 1) > i; i++)
+            {
+
+                if (i < message_byte.Length - 1)
+                {
+                    floatVals[i] = message_byte[i];
+                }
+                else
+                {
+                    if (j <= 1)
+                    {
+                        floatVals[i] = CRC_byte[j];
+                        j++;
+                    }
+                }
+            }
+
+            FX3U_PLC_Link_Modbus_Port.DiscardInBuffer();
+            FX3U_PLC_Link_Modbus_Port.Write(floatVals, 0, floatVals.Length);
+
+            int Sleep_Timer = 50;
+
+            Thread.Sleep(Sleep_Timer);
+
+            int iBytesToRead = FX3U_PLC_Link_Modbus_Port.BytesToRead;
+            byte[] receiveBytes = new byte[iBytesToRead];
+            //資料讀取
+            FX3U_PLC_Link_Modbus_Port.Read(receiveBytes, 0, receiveBytes.Length);
+
+            int Receive_Length = 0;
+            int Receive_Bytes_Number = 0;
+            for (int i = 0; i < receiveBytes.Length; i++)
+            {
+                if (receiveBytes[i] == 0x3)
+                {
+                    Receive_Length = receiveBytes[i + 1] / 2;
+                    Receive_Bytes_Number = i + 2;
+                    break;
+                }
+            }
+
+            int[] Receive_Data = new int[Position_Size];
+
+            for (int i = 0; i < Receive_Length; i++)
+            {
+                Receive_Data[i] = Convert.ToInt32(Convert.ToString(receiveBytes[Receive_Bytes_Number + i * 2], 16) + Convert.ToString(receiveBytes[Receive_Bytes_Number + i * 2 + 1], 16), 16);
+            }
+
+            return Receive_Data;
+
+        }
+
+        public void FX3U_Modbus_Write_Register_32Bit_Data(string Device, int Number, int[] Data)
+        {
+            try
+            {
+                //FX_Link_RS.Open();
+            }
+            catch
+            {
+                return;
+            }
+
+            int Device_Position = FX3U_Coil_M_Address;//取得線圈位置
+
+            Device_Position = Switch_Device_Register(Device);
+
+            Device_Position = Device_Position + Number;
+
+            if (Device_Position > 0xA7C7)
+            {
+                Device_Position = 0;
+            }
+
+            string message = null;
+            string message_device_position = null;
+            message_device_position = Convert.ToString(Device_Position, 16);
+
+            for (int i = message_device_position.Length; i <= 3; i++)//補到四位數
+            {
+                message_device_position = "0" + message_device_position;
+            }
+
+            message = "0110" + message_device_position;
+
+            string Position_Size = null;
+            string Data_Length = null;
+
+            Position_Size = Convert.ToString(Data.Length * 2, 16);
+            Data_Length = Convert.ToString(Data.Length * 4, 16);
+
+            for (int i = Position_Size.Length; i <= 3; i++)//補到四位數
+            {
+                Position_Size = "0" + Position_Size;
+            }
+
+            message = message + Position_Size;
+            for (int i = Data_Length.Length; i <= 1; i++)//補到二位數
+            {
+                Data_Length = "0" + Data_Length;
+            }
+
+            message = message + Data_Length;
+            ///*
+            Parallel.For(0, Data.Length, i =>
+            {
+                string Data_Arrange = null;
+                Data_Arrange = Convert.ToString(Data[i], 16);
+
+                for (int ii = Data_Arrange.Length; ii <= 7; ii++)//補到二位數
+                {
+                    Data_Arrange = "0" + Data_Arrange;
+                }
+
+                string e1 = null;
+                string e2 = null;
+                e1 = Data_Arrange.Substring(0, 4);
+                e2 = Data_Arrange.Substring(4, 4);
+
+                message = message + e2 + e1;
+            }
+            );
+            //*/
+            /*
+            for (int i = 0; i < Data.Length; i++)//編排寫入資料
+            {
+                string Data_Arrange = null;
+                Data_Arrange = Convert.ToString(Data[i], 16);
+
+                for (int ii = Data_Arrange.Length; ii <= 3; ii++)//補到二位數
+                {
+                    Data_Arrange = "0" + Data_Arrange;
+                }
+
+                message = message + Data_Arrange;
+                
+            }
+            //*/
+            byte[] message_byte = change(message);
+
+            byte[] CRC_byte = GetCRC(message_byte);
+
+            System.Array.Resize(ref message_byte, message_byte.Length + 2);
+
+            message_byte[message_byte.Length - 2] = CRC_byte[0];
+            message_byte[message_byte.Length - 1] = CRC_byte[1];
+
+            FX3U_PLC_Link_Modbus_Port.DiscardInBuffer();
+            FX3U_PLC_Link_Modbus_Port.Write(message_byte, 0, message_byte.Length);
+
+
+        }
+
+        private int Switch_Device_Register(string Device)
+        {
+            switch (Device)
+            {
+                case "D":
+                    return FX3U_Register_D_Address;
+                case "D8000":
+                    return FX3U_Register_D8000_Address;
+                case "R":
+                    return FX3U_Register_R_Address;
+                case "TN":
+                    return FX3U_Register_TN_Address;
+                case "CN":
+                    return FX3U_Register_CN_Address;
+                case "M":
+                    return FX3U_Register_M_Address;
+                case "M8000":
+                    return FX3U_Register_M8000_Address;
+                case "S":
+                    return FX3U_Register_S_Address;
+                case "TS":
+                    return FX3U_Register_TS_Address;
+                case "CS":
+                    return FX3U_Register_CS_Address;
+                case "Y":
+                    return FX3U_Register_Y_Address;
+                case "X":
+                    return FX3U_Register_X_Address;
+            }
+            return 0;
+        }
+
+        //把字串轉為 RTU
+        private Byte[] change(string iid)
+        {
+            string i1 = "";
+            int count, count1, count2;
+            int num;
+            Byte[] vals;
+            Byte[] floatVals = new Byte[iid.Length / 2 + 1];
+            count1 = iid.Length / 2;
+
+            for (int i = 1; i <= count1; i++)
+            {
+                count = i * 2;
+                count2 = count - 2;
+                num = Int32.Parse(iid.Substring(count2, 2), System.Globalization.NumberStyles.HexNumber);
+                vals = BitConverter.GetBytes(num);
+                Array.Copy(vals, 0, floatVals, i - 1, 2);
+            }
+
+
+            i1 = BitConverter.ToString(floatVals);
+
+            return floatVals;
+        }
+
+        //計算偵錯代碼
+        private byte[] GetCRC(byte[] message) // message : Modbus指令 ； CRC : 2 Byte Checksum
+        {
+            ushort CRCFull = 0xFFFF; // CRC 的初值設成 0xFFFF
+            byte CRCHigh = 0xFF, CRCLow = 0xFF; // CRC 的 High byte 和 Low byte
+            char CRCLSB; // CRC Least signficant bit
+            byte[] CRC = new byte[2];
+            for (int i = 0; i < (message.Length - 1); i++)
+            {
+                CRCFull = (ushort)(CRCFull ^ message[i]); // exclusive or 
+                //CRCFull ^= (ushort)("0x"+ message)
+
+                for (int j = 0; j < 8; j++)
+                {
+                    CRCLSB = (char)(CRCFull & 0x0001); // 取得 Least signficant bit
+                    CRCFull = (ushort)((CRCFull >> 1) & 0x7FFF); // 移去 Least signficant bit，前補0
+
+                    if (CRCLSB == 1) // 如果 Least signficant bit 為 1
+                        CRCFull = (ushort)(CRCFull ^ 0xA001);
+                }
+            }
+            CRC[1] = CRCHigh = (byte)((CRCFull >> 8) & 0xFF); // CRC high byte 在 後
+            CRC[0] = CRCLow = (byte)(CRCFull & 0xFF); // CRC low byte 在前
+            return CRC;
+        }
+    }
+}
