@@ -1,0 +1,589 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.IO.Ports;
+using System.Threading;
+
+namespace MIL_Text.Drive_Link
+{
+    class FX3U_PLC_Link_MC_RS485
+    {
+        public SerialPort FX3U_PLC_Link_MC_Port = new SerialPort();
+        /// <summary>
+        /// 開啟連線(COM,鮑率,同位數檢查,資料長度,結尾字元)   
+        /// Open_Port("COM10",38400,Parity.None,7,StopBits.One)
+        /// </summary>
+        public void Open_Port(string Port, int Baud, Parity Parity_Set, int Data_Bit, StopBits Stop_Bit)
+        {
+            FX3U_PLC_Link_MC_Port.PortName = Port;//設定COM
+            FX3U_PLC_Link_MC_Port.BaudRate = Baud;//設定包率
+            FX3U_PLC_Link_MC_Port.Parity = Parity_Set;//設定同位數檢查
+            FX3U_PLC_Link_MC_Port.DataBits = Data_Bit;//設定BIT資料長度
+            FX3U_PLC_Link_MC_Port.StopBits = Stop_Bit;//設定結尾字元
+            FX3U_PLC_Link_MC_Port.ReadTimeout = 100;//設定讀出異常時間
+            FX3U_PLC_Link_MC_Port.WriteTimeout = 100;//設定寫入異常時間
+            try
+            {
+                FX3U_PLC_Link_MC_Port.Open();//連線
+            }
+            catch
+            {
+
+            }
+        }
+
+        /// <summary>
+        /// 關閉通訊
+        /// </summary>
+        public void Close_Port()
+        {
+            try
+            {
+                FX3U_PLC_Link_MC_Port.Close();
+            }
+            catch
+            {
+
+            }
+        }
+
+        /// <summary>
+        /// 釋放通訊
+        /// </summary>
+        public void Free_Port()
+        {
+            FX3U_PLC_Link_MC_Port.Dispose();
+        }
+
+        /// <summary>
+        /// (接點,接點號碼,一陣列大小回傳 多少讀值)
+        /// PLC_FX3U_MC_Write_Bit("X",100,bool 陣列)
+        /// </summary>
+        public bool PLC_FX3U_MC_Write_Bit(string Device, int Number, bool[] Data)
+        {
+            string Device_Code = "X";
+            string Number_Code = "0000";
+            string Data_Length = Convert.ToString(Data.Length, 16);
+            string Data_Bool = null;
+
+            if (FX3U_PLC_Link_MC_Port.IsOpen == false)
+            {
+                return false;
+            }
+
+
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "X";
+                    break;
+                case "Y":
+                    Device_Code = "Y";
+                    break;
+                case "M":
+                    Device_Code = "M";
+                    break;
+                case "B":
+                    Device_Code = "B";
+                    break;
+                case "S":
+                    Device_Code = "S";
+                    break;
+            }
+
+            Number_Code = Convert.ToString(Number);
+
+            if (Number_Code.Length > 4 || Data_Length.Length > 2)
+                return false;
+
+            for (int i = Number_Code.Length; i < 4; i++)
+            {
+                Number_Code = "0" + Number_Code;
+            }
+
+            for (int i = Data_Length.Length; i < 2; i++)
+            {
+                Data_Length = "0" + Data_Length;
+            }
+
+
+            for (int i = 0; i < Data.Length; i++)
+            {
+                if (Data[i])
+                {
+                    Data_Bool = "1" + Data_Bool;
+                }
+                else
+                {
+                    Data_Bool = "0" + Data_Bool;
+                }
+
+            }
+
+            string snd = "00FFBW0" + Device_Code + Number_Code.ToUpper() + Data_Length.ToUpper() + Data_Bool;
+
+            snd = snd + SumCheck(snd).ToUpper();
+
+            snd = Chr(5) + snd;
+            byte[] floatVals = System.Text.Encoding.ASCII.GetBytes(snd);
+
+            FX3U_PLC_Link_MC_Port.Write(floatVals, 0, floatVals.Length);
+
+            return true;
+        }
+
+        /// <summary>
+        /// ()
+        /// PLC_FX3U_MC_Write_Bit("X",100,1)
+        /// </summary>
+        public bool[] PLC_FX3U_MC_Read_Bit(string Device, int Number, int Data_Size)
+        {
+            string Device_Code = "X";
+            string Number_Code = "0000";
+            string Data_Length = Convert.ToString(Data_Size, 16);
+            bool[] Data_Bool = new bool[Data_Size];
+
+            if (FX3U_PLC_Link_MC_Port.IsOpen == false)
+            {
+                return Data_Bool;
+            }
+
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "X";
+                    break;
+                case "Y":
+                    Device_Code = "Y";
+                    break;
+                case "M":
+                    Device_Code = "M";
+                    break;
+                case "B":
+                    Device_Code = "B";
+                    break;
+                case "S":
+                    Device_Code = "S";
+                    break;
+            }
+
+            Number_Code = Convert.ToString(Number);
+
+            if (Number_Code.Length > 4 || Data_Length.Length > 2)
+                return Data_Bool;
+
+            for (int i = Number_Code.Length; i < 4; i++)
+            {
+                Number_Code = "0" + Number_Code;
+            }
+
+            for (int i = Data_Length.Length; i < 2; i++)
+            {
+                Data_Length = "0" + Data_Length;
+            }
+
+            
+
+            string snd = "00FFBR0" + Device_Code + Number_Code.ToUpper() + Data_Length.ToUpper();
+
+            snd = snd + SumCheck(snd).ToUpper();
+
+            snd = Chr(5) + snd;
+            byte[] floatVals = System.Text.Encoding.ASCII.GetBytes(snd);
+            FX3U_PLC_Link_MC_Port.DiscardInBuffer();
+            FX3U_PLC_Link_MC_Port.Write(floatVals, 0, floatVals.Length);
+
+            Thread.Sleep(50);
+
+            int iBytesToRead = FX3U_PLC_Link_MC_Port.BytesToRead;
+
+            byte[] receiveBytes = new byte[iBytesToRead];
+            FX3U_PLC_Link_MC_Port.Read(receiveBytes, 0, receiveBytes.Length);
+            string receiveString = System.Text.Encoding.ASCII.GetString(receiveBytes);
+
+            int FF_Number = 0;
+            for (int i = 0; i < receiveString.Length - 2; i++)
+            {
+                if (receiveString.Substring(i, 2) == "FF")
+                {
+                    FF_Number = i + 2;
+                    break;
+                }
+            }
+            if (FF_Number == 0)
+                return Data_Bool;
+
+
+            for (int i = 0; i < Data_Size; i++)
+            {
+                string Data_String = null;
+                Data_String = receiveString.Substring(FF_Number + i, 1);
+                if (Data_String == "1")
+                {
+                    Data_Bool[i] = true;
+                }
+                else
+                {
+                    Data_Bool[i] = false;
+                }
+            }
+
+
+            return Data_Bool;
+        }
+        //最多64筆資料
+        public bool PLC_FX3U_MC_Write_Word(string Device, int Number, int[] Data)
+        {
+            if (FX3U_PLC_Link_MC_Port.IsOpen == false)
+            {
+                return false;
+            }
+
+
+            //選擇裝置
+            string Device_Code = "D";
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "X";
+                    break;
+                case "Y":
+                    Device_Code = "Y";
+                    break;
+                case "M":
+                    Device_Code = "M";
+                    break;
+                case "B":
+                    Device_Code = "B";
+                    break;
+                case "S":
+                    Device_Code = "S";
+                    break;
+                case "D":
+                    Device_Code = "D";
+                    break;
+                case "R":
+                    Device_Code = "R";
+                    break;
+            }
+
+            //裝置位數
+            string Number_Code = "0000";
+
+            Number_Code = Convert.ToString(Number);
+
+            for (int i = Number_Code.Length; i < 4; i++)
+            {
+                Number_Code = "0" + Number_Code;
+            }
+            //寫入長度
+            string Data_Length = Convert.ToString(Data.Length, 16);
+
+            for (int i = Data_Length.Length; i < 2; i++)
+            {
+                Data_Length = "0" + Data_Length;
+            }
+            //發現長度不對 停止執行
+            if (Number_Code.Length > 4 || Data_Length.Length > 2)
+                return false;
+
+            string snd = "00FFWW0" + Device_Code + Number_Code.ToUpper() + Data_Length.ToUpper();
+
+            for(int i = 0;i< Data.Length;i++)
+            {
+                string Data_Arrange = null;
+                Data_Arrange = Convert.ToString(Data[i], 16).ToUpper();
+
+                for (int ii = Data_Arrange.Length; ii <= 3; ii++)//補到四位數
+                {
+                    Data_Arrange = "0" + Data_Arrange;
+                }
+
+                snd = snd + Data_Arrange;
+            }
+            /*
+            //疊加載入資料
+            Parallel.For(0, Data.Length, i =>
+            {
+                string Data_Arrange = null;
+                Data_Arrange = Convert.ToString(Data[i], 16).ToUpper();
+
+                for (int ii = Data_Arrange.Length; ii <= 3; ii++)//補到四位數
+                {
+                    Data_Arrange = "0" + Data_Arrange;
+                }
+
+                snd = snd + Data_Arrange;
+            }
+            );
+            */
+            //加入確認碼
+            snd = snd + SumCheck(snd).ToUpper();
+            //加入STX
+            snd = Chr(5) + snd;
+            byte[] floatVals = System.Text.Encoding.ASCII.GetBytes(snd);
+
+            FX3U_PLC_Link_MC_Port.Write(floatVals, 0, floatVals.Length);
+
+            return true;
+        }
+        //最多32筆資料
+        public bool PLC_FX3U_MC_Write_32Word(string Device, int Number, int[] Data)
+        {
+            if (FX3U_PLC_Link_MC_Port.IsOpen == false)
+            {
+                return false;
+            }
+
+            //選擇裝置
+            string Device_Code = "D";
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "X";
+                    break;
+                case "Y":
+                    Device_Code = "Y";
+                    break;
+                case "M":
+                    Device_Code = "M";
+                    break;
+                case "B":
+                    Device_Code = "B";
+                    break;
+                case "S":
+                    Device_Code = "S";
+                    break;
+                case "D":
+                    Device_Code = "D";
+                    break;
+                case "R":
+                    Device_Code = "R";
+                    break;
+            }
+
+            //裝置位數
+            string Number_Code = "0000";
+
+            Number_Code = Convert.ToString(Number);
+
+            for (int i = Number_Code.Length; i < 4; i++)
+            {
+                Number_Code = "0" + Number_Code;
+            }
+            //寫入長度
+            string Data_Length = Convert.ToString(Data.Length * 2, 16);
+
+            for (int i = Data_Length.Length; i < 2; i++)
+            {
+                Data_Length = "0" + Data_Length;
+            }
+            //發現長度不對 停止執行
+            if (Number_Code.Length > 4 || Data_Length.Length > 2)
+                return false;
+
+            string snd = "00FFWW0" + Device_Code + Number_Code.ToUpper() + Data_Length.ToUpper();
+
+            //疊加載入資料
+            for(int i = 0; i< Data.Length;i++ )
+            {
+                string Data_Arrange = null;
+                Data_Arrange = Convert.ToString(Data[i], 16);
+
+                for (int ii = Data_Arrange.Length; ii <= 7; ii++)//補到二位數
+                {
+                    Data_Arrange = "0" + Data_Arrange;
+                }
+
+                string e1 = null;
+                string e2 = null;
+                e1 = Data_Arrange.Substring(0, 4);
+                e2 = Data_Arrange.Substring(4, 4);
+
+                snd = snd + e2.ToUpper() + e1.ToUpper();
+            }
+            /*
+            Parallel.For(0, Data.Length, i =>
+            {
+                string Data_Arrange = null;
+                Data_Arrange = Convert.ToString(Data[i], 16);
+
+                for (int ii = Data_Arrange.Length; ii <= 7; ii++)//補到二位數
+                {
+                    Data_Arrange = "0" + Data_Arrange;
+                }
+
+                string e1 = null;
+                string e2 = null;
+                e1 = Data_Arrange.Substring(0, 4);
+                e2 = Data_Arrange.Substring(4, 4);
+
+                snd = snd + e2.ToUpper() + e1.ToUpper();
+            }
+            );
+            */
+            //加入確認碼
+            snd = snd + SumCheck(snd).ToUpper();
+            //加入STX
+            snd = Chr(5) + snd;
+            byte[] floatVals = System.Text.Encoding.ASCII.GetBytes(snd);
+
+            FX3U_PLC_Link_MC_Port.Write(floatVals, 0, floatVals.Length);
+            //Thread.Sleep(100);
+            return true;
+        }
+
+        //最多64筆資料
+        public int[] PLC_FX3U_MC_Read_Word(string Device, int Number, int Data_Size)
+        {
+            int[] Data = new int[Data_Size];
+            if (FX3U_PLC_Link_MC_Port.IsOpen == false)
+            {
+                return Data;
+            }
+
+            //選擇裝置
+            string Device_Code = "D";
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "X";
+                    break;
+                case "Y":
+                    Device_Code = "Y";
+                    break;
+                case "M":
+                    Device_Code = "M";
+                    break;
+                case "B":
+                    Device_Code = "B";
+                    break;
+                case "S":
+                    Device_Code = "S";
+                    break;
+                case "D":
+                    Device_Code = "D";
+                    break;
+                case "R":
+                    Device_Code = "R";
+                    break;
+            }
+
+            //裝置位數
+            string Number_Code = "0000";
+
+            Number_Code = Convert.ToString(Number);
+
+            for (int i = Number_Code.Length; i < 4; i++)
+            {
+                Number_Code = "0" + Number_Code;
+            }
+            //寫入長度
+            string Data_Length = Convert.ToString(Data.Length, 16);
+
+            for (int i = Data_Length.Length; i < 2; i++)
+            {
+                Data_Length = "0" + Data_Length;
+            }
+            //發現長度不對 停止執行
+            if (Number_Code.Length > 4 || Data_Length.Length > 2)
+                return Data;
+
+            string snd = "00FFWR0" + Device_Code + Number_Code.ToUpper() + Data_Length.ToUpper();
+
+            //加入確認碼
+            snd = snd + SumCheck(snd).ToUpper();
+            //加入STX
+            snd = Chr(5) + snd;
+            byte[] floatVals = System.Text.Encoding.ASCII.GetBytes(snd);
+
+            FX3U_PLC_Link_MC_Port.Write(floatVals, 0, floatVals.Length);
+
+            Thread.Sleep(50);
+
+            int iBytesToRead = FX3U_PLC_Link_MC_Port.BytesToRead;
+
+            byte[] receiveBytes = new byte[iBytesToRead];
+            FX3U_PLC_Link_MC_Port.Read(receiveBytes, 0, receiveBytes.Length);
+
+            string receiveString = System.Text.Encoding.ASCII.GetString(receiveBytes);
+
+            int FF_Number = 0;
+            for (int i = 0; i < receiveString.Length - 2; i++)
+            {
+                if (receiveString.Substring(i, 2) == "FF")
+                {
+                    FF_Number = i + 2;
+                    break;
+                }
+            }
+            if (FF_Number == 0)
+                return Data;
+
+            for (int i = 0; i < Data.Length; i++)
+            {
+                Data[i] = Convert.ToInt32(receiveString.Substring(FF_Number + i * 4, 4), 16);
+            }
+
+
+            return Data;
+        }
+
+
+        Byte[] change(string iid)
+        {
+            string i1 = "";
+            int count, count1, count2;
+            int num;
+            Byte[] vals;
+            Byte[] floatVals = new Byte[iid.Length/2 +1];
+            count1 = iid.Length / 2;
+            for (int i = 1; i <= count1; i++)
+            {
+                count = i * 2;
+                count2 = count - 2;
+                num = Int32.Parse(iid.Substring(count2, 2), System.Globalization.NumberStyles.HexNumber);
+                vals = BitConverter.GetBytes(num);
+                Array.Copy(vals, 0, floatVals, i - 1, 2);
+            }
+            i1 = BitConverter.ToString(floatVals);
+
+            return floatVals;
+        }
+        
+        private static string Chr(int asciiCode)
+        {
+            if (asciiCode >= 0 && asciiCode <= 255)
+            {
+                System.Text.ASCIIEncoding asciiEncoding = new System.Text.ASCIIEncoding();
+                byte[] byteArray = new byte[] { (byte)asciiCode };
+                string strCharacter = asciiEncoding.GetString(byteArray);
+                return (strCharacter);
+            }
+            else
+            {
+                throw new Exception("ASCII Code is not valid.");
+            }
+        }
+
+
+
+        private string SumCheck(string data)
+        {
+            byte[] Value = System.Text.Encoding.ASCII.GetBytes(data);
+
+            int sum = 0;
+
+            for (int i = 0; i < Value.Length; i++)
+            {
+                sum = sum + Value[i];
+            }
+
+            string check_code = Convert.ToString(sum, 16);
+
+            return check_code.Substring(check_code.Length - 2, 2);
+        }
+    }
+}
