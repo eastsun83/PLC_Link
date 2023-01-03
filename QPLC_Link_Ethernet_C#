@@ -1,0 +1,560 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Net.Sockets;
+
+namespace MIL_Text.Drive_Link
+{
+    class QPLC_Link_MC
+    {
+        public static TcpClient client;
+        public static bool Link_Status = false;
+        static Byte[] change(string iid)
+        {
+            string i1 = "";
+            int count, count1, count2;
+            int num;
+            Byte[] vals;
+            Byte[] floatVals = new Byte[iid.Length / 2 + 1];
+            count1 = iid.Length / 2;
+            for (int i = 1; i <= count1; i++)
+            {
+                count = i * 2;
+                count2 = count - 2;
+                num = Int32.Parse(iid.Substring(count2, 2), System.Globalization.NumberStyles.HexNumber);
+                vals = BitConverter.GetBytes(num);
+                Array.Copy(vals, 0, floatVals, i - 1, 2);
+            }
+            i1 = BitConverter.ToString(floatVals);
+
+            return floatVals;
+        }
+
+        static void Number_Code(string Number, ref string Number_1, ref string Number_2)
+        {
+            if (Number.Length > 0)
+            {
+                if (Number.Length > 1)
+                    Number_1 = Number.Substring(Number.Length - 2, 2);
+                else
+                {
+                    Number_1 = Number.Substring(Number.Length - 1, 1);
+                    Number_1 = "0" + Number_1;
+                }
+            }
+            else
+            {
+                Number_1 = "00";
+            }
+
+            if (Number.Length > 2)
+            {
+                if (Number.Length > 3)
+                    Number_2 = Number.Substring(Number.Length - 4, 2);
+                else
+                {
+                    Number_2 = Number.Substring(Number.Length - 3, 1);
+                    Number_2 = "0" + Number_2;
+                }
+            }
+            else
+            {
+                Number_2 = "00";
+            }
+
+        }
+
+
+
+
+        public static string PLC_FX5U_Link(string IP, int Port)
+        {
+            if (client == null)
+            {
+                client = new TcpClient();
+            }
+
+            if (client.Connected == false)
+            {
+                try
+                {
+                    client.SendTimeout = 500;
+                    client.ReceiveTimeout = 500;
+                    client.Connect("192.168.2.39", 5010);
+                }
+                catch
+                {
+                    //MessageBox.Show("連線失敗");
+                    return "連線失敗";
+                }
+                Link_Status = true;
+            }
+
+
+            return "連線成功";
+        }
+
+        public void dispose()
+        {
+            if (client != null)
+            {
+                client.Dispose();
+                client = null;
+            }
+        }
+
+        public static string PLC_Q_Binerary_Write_Bit(string Device, string Number, bool Data)
+        {
+            if (client == null)
+                return "尚未初始";
+
+            if (client.Connected == false)
+                return "尚未連線";
+
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Device_Code = "90";
+            string Data_Code = "00";
+            Number_16 = Convert.ToString(Number);
+
+
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "2058";
+                    break;
+                case "Y":
+                    Device_Code = "2059";
+                    break;
+                case "M":
+                    Device_Code = "204D";
+                    break;
+                case "F":
+                    Device_Code = "2046";
+                    break;
+                case "B":
+                    Device_Code = "2042";
+                    break;
+            }
+
+            if (Data)
+            {
+                Data_Code = "01";
+            }
+            else
+            {
+                Data_Code = "00";
+            }
+
+            string snd;
+
+            if (Device == "M")
+            {
+                Number_16 = Convert.ToString(Convert.ToInt32(Number), 16);
+            }
+
+            Number_Code(Number_16, ref Number_16_01, ref Number_16_02);
+            snd = "04FF0A000100"
+                + Number_16_01 + Number_16_02 + "0000" + Device_Code + Data_Code;
+
+            //snd = "04FF0A00010039010000205900";
+            Byte[] floatVals = new Byte[snd.Length / 2];
+
+            floatVals = change(snd);
+            //textBox2.Text = BitConverter.ToString(floatVals);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch
+            {
+                return "尚未連線";
+            }
+
+            Byte[] RecvBytes = new Byte[snd.Length / 2];
+            String RecvString = "";
+            int ii = 0;
+            while (client.GetStream().DataAvailable)
+            {
+                System.Threading.Thread.Sleep(10);
+                ii++;
+                if (ii > 10)
+                    return "錯誤錯誤";
+            }
+
+            client.GetStream().Read(RecvBytes, 0, RecvBytes.Length);
+
+            //for(int i = 0; i< RecvBytes.Length;i++)
+            {
+                // RecvString = RecvBytes[i].ToString;
+            }
+            RecvString = System.Text.Encoding.BigEndianUnicode.GetString(RecvBytes);
+            RecvString = BitConverter.ToString(floatVals);
+            //client.Close();
+            //client.Dispose();
+            return RecvString;
+        }
+
+        public static string PLC_Q_Binerary_Read_Bit(string Device, string Number, out bool Data)
+        {
+            Data = false;
+            if (client == null)
+                return "尚未初始";
+
+            if (client.Connected == false)
+                return "尚未連線";
+
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Device_Code = "90";
+            Number_16 = Convert.ToString(Number);
+
+
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "2058";
+                    break;
+                case "Y":
+                    Device_Code = "2059";
+                    break;
+                case "M":
+                    Device_Code = "204D";
+                    break;
+                case "F":
+                    Device_Code = "2046";
+                    break;
+                case "B":
+                    Device_Code = "2042";
+                    break;
+            }
+
+
+            string snd;
+
+            if (Device == "M")
+            {
+                Number_16 = Convert.ToString(Convert.ToInt32(Number), 16);
+            }
+
+            Number_Code(Number_16, ref Number_16_01, ref Number_16_02);
+            snd = "00FF0A00"
+                + Number_16_01 + Number_16_02 + "0000" + Device_Code + "0100";
+
+            /*
+            Byte[] floatVals = new Byte[12];
+
+            floatVals[0] = 0;
+            floatVals[1] = 255;
+            floatVals[2] = 10;
+            floatVals[3] = 0;
+            floatVals[4] = Convert.ToByte(Number_16_01.ToString(),16);
+            floatVals[5] = Convert.ToByte(Number_16_02.ToString(), 16);
+            floatVals[6] = 0;
+            floatVals[7] = 0;
+            floatVals[8] = Convert.ToByte();
+            floatVals[0] = 0;
+            floatVals[0] = 0;
+            floatVals[0] = 0;
+            floatVals[0] = 0;
+            floatVals[0] = 0;
+            */
+
+            //snd = "04FF0A00010039010000205900";
+            Byte[] floatVals = new Byte[snd.Length / 2];
+
+            floatVals = change(snd);
+            //textBox2.Text = BitConverter.ToString(floatVals);
+            // 把資料送給伺服器
+
+            try
+            {
+
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch
+            {
+                return "尚未連線";
+            }
+
+
+            String RecvString = "";
+            while (client.GetStream().DataAvailable)
+            {
+
+            }
+            Byte[] RecvBytes = new Byte[client.GetStream().Length];
+            client.GetStream().Read(RecvBytes, 0, RecvBytes.Length);
+
+            //for(int i = 0; i< RecvBytes.Length;i++)
+            {
+                // RecvString = RecvBytes[i].ToString;
+            }
+            RecvString = BitConverter.ToString(RecvBytes);
+
+            if (RecvBytes != null)
+                if (RecvBytes.Length > 2)
+                    if (RecvBytes[0] == 128 && RecvBytes[1] == 0)
+                    {
+                        if (RecvBytes[2] == 16)
+                            Data = true;
+                        else
+                            Data = false;
+                    }
+
+            //RecvString = BitConverter.ToString(floatVals);
+            //client.Close();
+            //client.Dispose();
+            return RecvString;
+
+        }
+        public static string PLC_Q_Binerary_Read_Bit_ReadLogin(out bool[] data)
+        {
+            bool[] read_data = new bool[0];
+            string snd = null;
+            data = read_data;
+            if (client == null)
+                return "尚未初始";
+
+            if (client.Connected == false)
+                return "尚未連線";
+
+            snd = "08FF0A00";
+
+
+            Byte[] floatVals = new Byte[snd.Length / 2];
+
+            floatVals = change(snd);
+            //textBox2.Text = BitConverter.ToString(floatVals);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch
+            {
+                return "尚未連線";
+            }
+
+            Byte[] RecvBytes = new Byte[snd.Length / 2];
+            String RecvString = "";
+            while (client.GetStream().DataAvailable)
+            {
+
+            }
+
+            client.GetStream().Read(RecvBytes, 0, RecvBytes.Length);
+
+            //for(int i = 0; i< RecvBytes.Length;i++)
+            {
+                // RecvString = RecvBytes[i].ToString;
+            }
+            RecvString = BitConverter.ToString(RecvBytes);
+
+            if (RecvBytes.Length > 2)
+            {
+                read_data = new bool[RecvBytes.Length - 2];
+                for (int i = 2; i < RecvBytes.Length; i++)
+                {
+                    if (RecvBytes[i] == 1)
+                    {
+                        read_data[i - 2] = true;
+                    }
+                    else
+                    {
+                        read_data[i - 2] = false;
+                    }
+                }
+            }
+            data = read_data;
+
+            return "";
+        }
+        public static string PLC_Q_Binerary_Read_Bit_Login(string[] Device, string[] Number)
+        {
+            string snd = null;
+            if (client == null)
+                return "尚未初始";
+
+            if (client.Connected == false)
+                return "尚未連線";
+
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Device_Code = "90";
+
+            string device_number = Convert.ToString(Device.Length, 16);
+
+            if (device_number.Length < 2)
+            {
+                device_number = "0" + device_number;
+            }
+            if (device_number.Length > 2)
+            {
+                device_number = "00";
+            }
+
+            snd = "06FF0A00" + device_number + "00";
+
+            for (int i = 0; i < Device.Length; i++)
+            {
+                switch (Device[i])
+                {
+                    case "X":
+                        Device_Code = "2058";
+                        break;
+                    case "Y":
+                        Device_Code = "2059";
+                        break;
+                    case "M":
+                        Device_Code = "204D";
+                        break;
+                    case "F":
+                        Device_Code = "2046";
+                        break;
+                    case "B":
+                        Device_Code = "2042";
+                        break;
+                }
+
+                if (Device[i] == "M")
+                {
+                    Number_16 = Convert.ToString(Convert.ToInt32(Number[i]), 16);
+                }
+
+                Number_Code(Number[i], ref Number_16_01, ref Number_16_02);
+                snd = snd + Number_16_01 + Number_16_02 + "0000" + Device_Code;
+            }
+
+
+            //snd = "04FF0A00010039010000205900";
+            Byte[] floatVals = new Byte[snd.Length / 2];
+
+            floatVals = change(snd);
+            //textBox2.Text = BitConverter.ToString(floatVals);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch
+            {
+                return "尚未連線";
+            }
+
+            Byte[] RecvBytes = new Byte[snd.Length / 2];
+            String RecvString = "";
+
+            while (client.GetStream().DataAvailable)
+            {
+                //Application.DoEvents();
+            }
+
+            client.GetStream().Read(RecvBytes, 0, RecvBytes.Length);
+
+            //for(int i = 0; i< RecvBytes.Length;i++)
+            {
+                // RecvString = RecvBytes[i].ToString;
+            }
+            RecvString = BitConverter.ToString(RecvBytes);
+
+
+            //RecvString = BitConverter.ToString(floatVals);
+            //client.Close();
+            //client.Dispose();
+            return RecvString;
+
+        }
+
+        public string PLC_FX5U_Write_Data(string IP, int Port, string Device, int Number, int Data)
+        {
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Number_16_03 = "00";
+            string Device_Code = "A8";
+            Number_16 = Convert.ToString(Number, 16);
+            Number_Code(Number_16, ref Number_16_01, ref Number_16_02);
+            string Data_16 = "";
+            string Data_16_01 = "00";
+            string Data_16_02 = "00";
+            Data_16 = Convert.ToString(Number, 16);
+            Number_Code(Data_16, ref Data_16_01, ref Data_16_02);
+            //client = new TcpClient();
+
+
+            try
+            {
+                //client.Connect(IP, Port);
+            }
+            catch
+            {
+                //MessageBox.Show("Connect Error");
+                return "Connect Error";
+            }
+
+            switch (Device)
+            {
+                case "D":
+                    Device_Code = "A8";
+                    break;
+                case "W":
+                    Device_Code = "B4";
+                    break;
+            }
+
+            string snd = "5000"
+                + "00"
+                + "FF"
+                + "FF03"
+                + "00"
+                + "0E00"
+                + "0000"
+                + "0104"
+                + "0000"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + "0100"
+                + Data_16_01 + Data_16_02;
+
+            Byte[] floatVals = new Byte[20];
+
+            floatVals = change(snd);
+            //textBox2.Text = BitConverter.ToString(floatVals);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch
+            {
+            }
+
+            Byte[] RecvBytes = new Byte[20];
+            String RecvString = "";
+
+            while (client.GetStream().DataAvailable)
+            {
+                //Application.DoEvents();
+            }
+
+            client.GetStream().Read(RecvBytes, 0, RecvBytes.Length);
+
+            RecvString = Encoding.ASCII.GetString(RecvBytes);
+
+            //client.Close();
+            //client.Dispose();
+            return "Connect Complete";
+        }
+    }
+}
