@@ -1,0 +1,775 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Net;
+using System.Net.Sockets;
+using System.Windows.Forms;
+
+
+//FX5U 網路連線API
+namespace MIL_Text.Drive_Link
+{
+    class FX5U_PLC_Link
+    {
+        TcpClient client;
+        public int Link_Error_Count = 0;
+        //bool LinkState = false;
+        /// <summary>
+        /// 開啟連線(COM,鮑率,同位數檢查,資料長度,結尾字元)   
+        /// Open_Port("COM10",38400,Parity.None,7,StopBits.One)
+        /// </summary>
+        public void Open_Port(string IP, int Port)
+        {
+            try
+            {
+                client.Connect(IP, Port);
+                //client.BeginConnect("localhost", 80, OnConnect, null);
+                //client.NoDelay = true;
+                //client.
+            }
+            catch (Exception e2)
+            {
+                //Syauto_MessageBox.Show(e2.Message);
+                Link_Error_Count++;
+            }
+        }
+        /// <summary>
+        /// 關閉通訊
+        /// </summary>
+        public void Close_Port()
+        {
+            try
+            {
+                client.Close();
+            }
+            catch (Exception e2)
+            {
+                Syauto_MessageBox.Show(e2.Message);
+            }
+        }
+        /// <summary>
+        /// 釋放通訊
+        /// </summary>
+        public void Free_Port()
+        {
+            client.Dispose();
+        }
+        int ALARM_LINK_COUNT = 0;
+        public bool[] PLC_FX5U_Read_Bit(string IP, int port, string Device, int Number, int DataSize)
+        {
+            client = new TcpClient();
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Number_16_03 = "00";
+            string Device_Code = "90";
+            Number_16 = Convert.ToString(Number, 16);
+            Number_Code(Number_16, out Number_16_01, out Number_16_02, out Number_16_03);
+
+            try
+            {
+                client.Connect(IP, port);
+            }
+            catch
+            {
+                Link_Error_Count++;
+                return null;
+            }
+
+
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "9C";
+                    break;
+                case "Y":
+                    Device_Code = "9D";
+                    break;
+                case "M":
+                    Device_Code = "90";
+                    break;
+                case "L":
+                    Device_Code = "92";
+                    break;
+                case "F":
+                    Device_Code = "93";
+                    break;
+                case "V":
+                    Device_Code = "94";
+                    break;
+                case "B":
+                    Device_Code = "A0";
+                    break;
+                case "S":
+                    Device_Code = "B4";
+                    break;
+            }
+
+
+            Number_16 = Convert.ToString(Number, 16);
+            Number_Code(Number_16, out Number_16_01, out Number_16_02, out Number_16_03);
+
+            string DataSize2 = null;
+            string DataSize3 = null;
+            Number_Code(Convert.ToString(DataSize, 16), out DataSize2, out DataSize3);
+
+            string snd3 = null;
+            string snd4 = null;
+
+            string snd2 = "0000"
+                + "0104"
+                + "0100"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + DataSize2 + DataSize3;
+
+            Number_Code(Convert.ToString(snd2.Length / 2, 16), out snd3, out snd4);
+
+            string snd = "5000"
+                + "00"
+                + "FF"
+                + "FF03"
+                + "00"
+                + snd3 + snd4
+                + snd2;
+
+            Byte[] floatVals = new Byte[snd.Length / 2 + 1];
+
+            floatVals = change(snd);
+            //textBox2.Text = BitConverter.ToString(floatVals);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch
+            {
+            }
+
+            ALARM_LINK_COUNT = 0;
+            client.GetStream().Flush();
+            while (client.GetStream().DataAvailable)
+            {
+                System.Threading.Thread.Sleep(10);
+                ALARM_LINK_COUNT++;
+                if(ALARM_LINK_COUNT >= 100)
+                {
+                    return null;
+                }
+                //Application.DoEvents();
+            }
+
+            Byte[] RecvBytes = new Byte[11 + DataSize / 2];
+            String RecvString = "";
+
+            client.GetStream().Read(RecvBytes, 0, RecvBytes.Length);
+
+            RecvString = Encoding.ASCII.GetString(RecvBytes);
+            
+            client.Dispose();
+            bool[] RecvData = new bool[DataSize];
+            for (int i = 0; i < DataSize; i++)
+            {
+
+                if ((i % 2) == 0)
+                {
+                    if (RecvBytes[i / 2 + 11] >= 16)
+                    {
+                        RecvData[i] = true;
+                    }
+                    else
+                    {
+                        RecvData[i] = false;
+                    }
+
+                }
+                else
+                {
+                    if ((RecvBytes[(i / 2) + 11]) == 17 || (RecvBytes[(i / 2) + 11]) == 1)
+                    {
+                        RecvData[i] = true;
+                    }
+                    else
+                    {
+                        RecvData[i] = false;
+                    }
+                }
+
+            }
+            
+            return RecvData;
+            
+        }
+        //Device 例如Y M   Number 所選擇Y號碼 
+        public string PLC_FX5U_Write_Bit(string IP, int port, string Device, int Number, bool[] Data)
+        {
+            client = new TcpClient();
+            try
+            {
+                client.Connect(IP, port);
+            }
+            catch(Exception e2)
+            {
+                Link_Error_Count++;
+                //Syauto_MessageBox.Show(e2.Message);
+                return "";
+            }
+
+
+            string DataSize2 = null;
+            string DataSize3 = null;
+            Number_Code(Convert.ToString(Data.Length, 16), out DataSize2, out DataSize3);
+
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Number_16_03 = "00";
+            string Device_Code = "90";
+            string Data_Code = null;
+            Number_16 = Convert.ToString(Number, 16);
+            Number_Code(Number_16, out Number_16_01, out Number_16_02, out Number_16_03);
+
+            if (client.Connected == false)
+            {
+                return "";
+            }
+
+            switch (Device)
+            {
+                case "X":
+                    Device_Code = "9C";
+                    break;
+                case "Y":
+                    Device_Code = "9D";
+                    break;
+                case "M":
+                    Device_Code = "90";
+                    break;
+                case "L":
+                    Device_Code = "92";
+                    break;
+                case "F":
+                    Device_Code = "93";
+                    break;
+                case "V":
+                    Device_Code = "94";
+                    break;
+                case "B":
+                    Device_Code = "A0";
+                    break;
+                case "S":
+                    Device_Code = "B4";
+                    break;
+
+            }
+
+
+            for (int i = 0; i < Data.Length; i++)
+            {
+                if (Data[i] == true)
+                {
+                    Data_Code = Data_Code + "1";
+                }
+                else
+                {
+                    Data_Code = Data_Code + "0";
+                }
+            }
+
+            if ((Data_Code.Length % 2) == 1)
+            {
+                Data_Code = Data_Code + "0";
+            }
+
+            string snd3 = null;
+            string snd4 = null;
+
+            string snd2 = "0000"
+                + "0114"
+                + "0100"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + DataSize2 + DataSize3
+                + Data_Code;
+
+            Number_Code(Convert.ToString(snd2.Length / 2, 16), out snd3, out snd4);
+
+            string snd = "5000"
+                + "00"
+                + "FF"
+                + "FF03"
+                + "00"
+                + snd3 + snd4
+                + snd2;
+
+            snd = snd.ToUpper();
+
+            Byte[] floatVals = new Byte[snd.Length / 2 + 1];
+
+            floatVals = change(snd);
+            // 把資料送給伺服器
+            try
+            {
+                if (client.GetStream().CanWrite)
+                    client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch (Exception e2)
+            {
+                Syauto_MessageBox.Show(e2.Message);
+            }
+
+            client.Dispose();
+            return snd;
+        }
+
+        public string PLC_FX5U_Read_Data(string IP, int Port, string Device, int Number)
+        {
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Number_16_03 = "00";
+            string Device_Code = "A8";
+            Number_16 = Convert.ToString(Number, 16);
+            Number_Code(Number_16, out Number_16_01, out Number_16_02, out Number_16_03);
+
+            if (client.Connected == false)
+            {
+                return "";
+            }
+
+            switch (Device)
+            {
+                case "D":
+                    Device_Code = "A8";
+                    break;
+                case "W":
+                    Device_Code = "B4";
+                    break;
+            }
+
+            string snd = "5000"
+                + "00"
+                + "FF"
+                + "FF03"
+                + "00"
+                + "0C00"
+                + "0000"
+                + "0104"
+                + "0000"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + "0100";
+
+            Byte[] floatVals = new Byte[20];
+
+            floatVals = change(snd);
+            //textBox2.Text = BitConverter.ToString(floatVals);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch (Exception e2)
+            {
+                Syauto_MessageBox.Show(e2.Message);
+            }
+
+
+            int iBytesToRead = client.ReceiveBufferSize;
+            Byte[] RecvBytes = new Byte[iBytesToRead];
+            String RecvString = "";
+
+            ALARM_LINK_COUNT = 0;
+            client.GetStream().Flush();
+            while (client.GetStream().DataAvailable)
+            {
+                System.Threading.Thread.Sleep(10);
+                ALARM_LINK_COUNT++;
+                if (ALARM_LINK_COUNT >= 100)
+                {
+                    return null;
+                }
+                //Application.DoEvents();
+            }
+
+            client.GetStream().Read(RecvBytes, 0, RecvBytes.Length);
+
+            RecvString = Encoding.ASCII.GetString(RecvBytes);
+
+            //client.Dispose();
+            return Convert.ToString(RecvBytes[13] + RecvBytes[12] + RecvBytes[11]);
+
+        }
+
+        public string PLC_FX5U_Write_Data(string IP, int Port, string Device, int Number, int[] Data)
+        {
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Number_16_03 = "00";
+            string Device_Code = "A8";
+            Number_16 = Convert.ToString(Number, 16);
+            Number_Code(Number_16, out Number_16_01, out Number_16_02, out Number_16_03);
+            string Data_16 = "";
+            string Data_16_01 = "00";
+            string Data_16_02 = "00";
+            string Data_16_03 = "00";
+            Data_16 = Convert.ToString(Data.Length, 16);
+            Number_Code(Data_16, out Data_16_01, out Data_16_02, out Data_16_03);
+
+            client = new TcpClient();
+
+            try
+            {
+                client.Connect(IP, Port);
+            }
+            catch
+            {
+                //MessageBox.Show("Connect Error");
+                Link_Error_Count++;
+                return "Connect Error";
+            }
+
+            switch (Device)
+            {
+                case "D":
+                    Device_Code = "A8";
+                    break;
+                case "W":
+                    Device_Code = "B4";
+                    break;
+                case "M":
+                    Device_Code = "90";
+                    break;
+            }
+
+
+            string ArrayData = null;
+            for (int i = 0; i < Data.Length; i++)
+            {
+                string ss = null;
+                string s1 = null;
+                string s2 = null;
+                ss = Convert.ToString(Data[i], 16);
+                Number_Code(ss, out s1, out s2);
+                ArrayData = ArrayData + s1 + s2;
+            }
+
+            string snd2 = "0000"
+               + "0114"
+               + "0000"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + Data_16_01 + Data_16_02
+                + ArrayData;
+
+            string snd3 = null;
+            string snd4 = null;
+            Number_Code(Convert.ToString(snd2.Length / 2, 16), out snd3, out snd4);
+
+
+            string snd = "5000"
+               + "00"
+               + "FF"
+               + "FF03"
+               + "00"
+               + snd3 + snd4
+               + "0000"
+               + "0114"
+               + "0000"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + Data_16_01 + Data_16_02
+                + ArrayData;
+
+            snd = snd.ToUpper();
+
+            Byte[] floatVals = new Byte[snd.Length / 2 + 1];
+
+            floatVals = change(snd);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch (Exception e2)
+            {
+                Syauto_MessageBox.Show(e2.Message);
+            }
+
+            client.Dispose();
+            return snd;
+        }
+
+        public string PLC_FX5U_Write_32Data(string IP, int Port, string Device, int Number, int[] Data)
+        {
+            string Number_16 = "";
+            string Number_16_01 = "00";
+            string Number_16_02 = "00";
+            string Number_16_03 = "00";
+            string Device_Code = "A8";
+            Number_16 = Convert.ToString(Number, 16);
+            Number_Code(Number_16, out Number_16_01, out Number_16_02, out Number_16_03);
+            string Data_16 = "";
+            string Data_16_01 = "00";
+            string Data_16_02 = "00";
+            string Data_16_03 = "00";
+            Data_16 = Convert.ToString(Data.Length * 2, 16);
+            Number_Code(Data_16, out Data_16_01, out Data_16_02, out Data_16_03);
+
+            client = new TcpClient();
+
+            try
+            {
+                client.Connect(IP, Port);
+            }
+            catch
+            {
+                Link_Error_Count++;
+                //MessageBox.Show("Connect Error");
+                return "Connect Error";
+            }
+
+            switch (Device)
+            {
+                case "D":
+                    Device_Code = "A8";
+                    break;
+                case "W":
+                    Device_Code = "B4";
+                    break;
+                case "M":
+                    Device_Code = "90";
+                    break;
+            }
+
+
+            string ArrayData = null;
+            for (int i = 0; i < Data.Length; i++)
+            {
+                string ss = null;
+                string s1 = null;
+                string s2 = null;
+                string s3 = null;
+                string s4 = null;
+                ss = Convert.ToString(Data[i], 16);
+                Number_Code(ss, out s1, out s2, out s3, out s4);
+                ArrayData = ArrayData + s1 + s2 + s3 + s4;
+            }
+
+            string snd2 = "0000"
+               + "0114"
+               + "0000"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + Data_16_01 + Data_16_02
+                + ArrayData;
+
+            string snd3 = null;
+            string snd4 = null;
+            Number_Code(Convert.ToString(snd2.Length / 2, 16), out snd3, out snd4);
+
+
+            string snd = "5000"
+               + "00"
+               + "FF"
+               + "FF03"
+               + "00"
+               + snd3 + snd4
+               + "0000"
+               + "0114"
+               + "0000"
+                + Number_16_01 + Number_16_02 + Number_16_03
+                + Device_Code
+                + Data_16_01 + Data_16_02
+                + ArrayData;
+
+            snd = snd.ToUpper();
+
+            Byte[] floatVals = new Byte[snd.Length / 2 + 1];
+
+            floatVals = change(snd);
+            // 把資料送給伺服器
+
+            try
+            {
+                client.GetStream().Write(floatVals, 0, floatVals.Length);
+            }
+            catch(Exception e2)
+            {
+                Syauto_MessageBox.Show(e2.Message);
+            }
+            
+            client.Dispose();
+            return snd;
+        }
+
+        Byte[] change(string iid)
+        {
+            string i1 = "";
+            int count, count1, count2;
+            int num;
+            Byte[] vals;
+            Byte[] floatVals = new Byte[iid.Length / 2 + 1];
+            count1 = iid.Length / 2;
+            for (int i = 1; i <= count1; i++)
+            {
+                count = i * 2;
+                count2 = count - 2;
+                num = Int32.Parse(iid.Substring(count2, 2), System.Globalization.NumberStyles.HexNumber);
+                vals = BitConverter.GetBytes(num);
+                Array.Copy(vals, 0, floatVals, i - 1, 2);
+            }
+            i1 = BitConverter.ToString(floatVals);
+
+            return floatVals;
+        }
+
+        void Number_Code(string Number, out string Number_1, out string Number_2, out string Number_3, out string Number_4)
+        {
+            if (Number.Length > 0)
+            {
+                if (Number.Length > 1)
+                    Number_1 = Number.Substring(Number.Length - 2, 2);
+                else
+                {
+                    Number_1 = Number.Substring(Number.Length - 1, 1);
+                    Number_1 = "0" + Number_1;
+                }
+            }
+            else
+            {
+                Number_1 = "";
+            }
+
+            if (Number.Length > 2)
+            {
+                if (Number.Length > 3)
+                    Number_2 = Number.Substring(Number.Length - 4, 2);
+                else
+                {
+                    Number_2 = Number.Substring(Number.Length - 3, 1);
+                    Number_2 = "0" + Number_2;
+                }
+            }
+            else
+            {
+                Number_2 = "00";
+            }
+
+            if (Number.Length > 4)
+            {
+                if (Number.Length > 5)
+                    Number_3 = Number.Substring(Number.Length - 6, 2);
+                else
+                {
+                    Number_3 = Number.Substring(Number.Length - 5, 1);
+                    Number_3 = "0" + Number_3;
+                }
+            }
+            else
+            {
+                Number_3 = "00";
+            }
+            if (Number.Length > 6)
+            {
+                if (Number.Length > 7)
+                    Number_4 = Number.Substring(Number.Length - 8, 2);
+                else
+                {
+                    Number_4 = Number.Substring(Number.Length - 7, 1);
+                    Number_4 = "0" + Number_4;
+                }
+            }
+            else
+            {
+                Number_4 = "00";
+            }
+        }
+        void Number_Code(string Number, out string Number_1, out string Number_2, out string Number_3)
+        {
+            if (Number.Length > 0)
+            {
+                if (Number.Length > 1)
+                    Number_1 = Number.Substring(Number.Length - 2, 2);
+                else
+                {
+                    Number_1 = Number.Substring(Number.Length - 1, 1);
+                    Number_1 = "0" + Number_1;
+                }
+            }
+            else
+            {
+                Number_1 = "";
+            }
+
+            if (Number.Length > 2)
+            {
+                if (Number.Length > 3)
+                    Number_2 = Number.Substring(Number.Length - 4, 2);
+                else
+                {
+                    Number_2 = Number.Substring(Number.Length - 3, 1);
+                    Number_2 = "0" + Number_2;
+                }
+            }
+            else
+            {
+                Number_2 = "00";
+            }
+
+            if (Number.Length > 4)
+            {
+                if (Number.Length > 5)
+                    Number_3 = Number.Substring(Number.Length - 6, 2);
+                else
+                {
+                    Number_3 = Number.Substring(Number.Length - 5, 1);
+                    Number_3 = "0" + Number_3;
+                }
+            }
+            else
+            {
+                Number_3 = "00";
+            }
+        }
+        void Number_Code(string Number, out string Number_1, out string Number_2)
+        {
+            if (Number.Length > 0)
+            {
+                if (Number.Length > 1)
+                    Number_1 = Number.Substring(Number.Length - 2, 2);
+                else
+                {
+                    Number_1 = Number.Substring(Number.Length - 1, 1);
+                    Number_1 = "0" + Number_1;
+                }
+            }
+            else
+            {
+                Number_1 = "";
+            }
+
+            if (Number.Length > 2)
+            {
+                if (Number.Length > 3)
+                    Number_2 = Number.Substring(Number.Length - 4, 2);
+                else
+                {
+                    Number_2 = Number.Substring(Number.Length - 3, 1);
+                    Number_2 = "0" + Number_2;
+                }
+            }
+            else
+            {
+                Number_2 = "00";
+            }
+
+        }
+    }
+}
